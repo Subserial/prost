@@ -139,7 +139,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use log::trace;
-use prost::Message;
+use prost::{ExtensionRegistry, Message};
 use prost_types::{FileDescriptorProto, FileDescriptorSet};
 
 pub use crate::ast::{Comments, Method, Service};
@@ -245,6 +245,7 @@ pub struct Config {
     disable_comments: PathMap<()>,
     skip_protoc_run: bool,
     include_file: Option<PathBuf>,
+    extension_registry: Option<ExtensionRegistry>,
 }
 
 impl Config {
@@ -754,6 +755,13 @@ impl Config {
         self
     }
 
+
+    /// Set the extension registry for the parser.
+    pub fn extension_registry(&mut self, arg: ExtensionRegistry) -> &mut Self {
+        self.extension_registry = Some(arg);
+        self
+    }
+
     /// Compile `.proto` files into Rust files during a Cargo build with additional code generator
     /// configuration options.
     ///
@@ -850,7 +858,11 @@ impl Config {
         }
 
         let buf = fs::read(file_descriptor_set_path)?;
-        let file_descriptor_set = FileDescriptorSet::decode(&*buf).map_err(|error| {
+        let file_descriptor_set = if let Some(extension_registry) = &self.extension_registry {
+            FileDescriptorSet::decode_with_extensions(&*buf, extension_registry.clone())
+        } else {
+            FileDescriptorSet::decode(&*buf)
+        }.map_err(|error| {
             Error::new(
                 ErrorKind::InvalidInput,
                 format!("invalid FileDescriptorSet: {}", error),
@@ -1032,6 +1044,7 @@ impl default::Default for Config {
             disable_comments: PathMap::default(),
             skip_protoc_run: false,
             include_file: None,
+            extension_registry: None,
         }
     }
 }

@@ -191,7 +191,6 @@ where
 /// The context should be passed by value and can be freely cloned. When passing
 /// to a function which is decoding a nested object, then use `enter_recursion`.
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "no-recursion-limit", derive(Default))]
 pub struct DecodeContext {
     /// How many times we can recurse in the current decode stack before we hit
     /// the recursion limit.
@@ -207,13 +206,13 @@ pub struct DecodeContext {
     extension_registry: Option<Rc<ExtensionRegistry>>,
 }
 
-#[cfg(not(feature = "no-recursion-limit"))]
 impl Default for DecodeContext {
     #[inline]
     fn default() -> DecodeContext {
         DecodeContext {
+            #[cfg(not(feature = "no-recursion-limit"))]
             recurse_count: crate::RECURSION_LIMIT,
-            extension_registry: None,
+            extension_registry: Some(Rc::new(ExtensionRegistry::new())),
         }
     }
 }
