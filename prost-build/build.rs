@@ -75,7 +75,7 @@ fn vendored() -> bool {
 
 /// Compile `protoc` via `cmake`.
 fn compile() -> Option<PathBuf> {
-    let protobuf_src = bundle_path().join("protobuf").join("cmake");
+    let protobuf_src = bundle_path().join("protobuf");
 
     println!("cargo:rerun-if-changed={}", protobuf_src.display());
 
