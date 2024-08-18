@@ -119,6 +119,14 @@ extend google.protobuf.EnumValueOptions {
     string enum_value_opt = 50000;
 }
 
+extend google.protobuf.MethodOptions {
+    string method_opt = 50000;
+}
+
+extend google.protobuf.ServiceOptions {
+    string service_opt = 50000;
+}
+
 message NestedOptions {
     extend google.protobuf.MessageOptions {
         // A nested extension
@@ -143,4 +151,19 @@ message MessageWithCustomOptions {
 enum EnumWithCustomOptions {
     option (enum_opt) = "hello";
     Default = 0 [(enum_value_opt) = "hello"];
+}
+
+message Input {
+    string in = 1;
+}
+
+message Output {
+    string out = 1;
+}
+
+service ServiceWithCustomOptions {
+    option (service_opt) = "hello";
+    rpc MethodWithCustomOptions(Input) returns (Output) {
+        option (method_opt) = "hello";
+    }
 }

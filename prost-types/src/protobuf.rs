@@ -42,9 +42,14 @@ pub struct FileDescriptorProto {
     #[prost(message, optional, tag="9")]
     pub source_code_info: ::core::option::Option<SourceCodeInfo>,
     /// The syntax of the proto file.
-    /// The supported values are "proto2" and "proto3".
+    /// The supported values are "proto2", "proto3", and "editions".
+    ///
+    /// If `edition` is present, this value must be "editions".
     #[prost(string, optional, tag="12")]
     pub syntax: ::core::option::Option<::prost::alloc::string::String>,
+    /// The edition of the proto file.
+    #[prost(enumeration="Edition", optional, tag="14")]
+    pub edition: ::core::option::Option<i32>,
 }
 /// Describes a message type.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -103,8 +108,56 @@ pub struct ExtensionRangeOptions {
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag="999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
+    /// For external users: DO NOT USE. We are in the process of open sourcing
+    /// extension declaration and executing internal cleanups before it can be
+    /// used externally.
+    #[prost(message, repeated, tag="2")]
+    pub declaration: ::prost::alloc::vec::Vec<extension_range_options::Declaration>,
+    /// Any features defined in the specific edition.
+    #[prost(message, optional, tag="50")]
+    pub features: ::core::option::Option<FeatureSet>,
+    /// The verification state of the range.
+    /// TODO: flip the default to DECLARATION once all empty ranges
+    /// are marked as UNVERIFIED.
+    #[prost(enumeration="extension_range_options::VerificationState", optional, tag="3", default="Unverified")]
+    pub verification: ::core::option::Option<i32>,
     #[prost(extension_set)]
     pub extension_set: ::prost::ExtensionSet<Self>,
+}
+/// Nested message and enum types in `ExtensionRangeOptions`.
+pub mod extension_range_options {
+    #[derive(Clone, PartialEq, ::prost::Message)]
+    pub struct Declaration {
+        /// The extension number declared within the extension range.
+        #[prost(int32, optional, tag="1")]
+        pub number: ::core::option::Option<i32>,
+        /// The fully-qualified name of the extension field. There must be a leading
+        /// dot in front of the full name.
+        #[prost(string, optional, tag="2")]
+        pub full_name: ::core::option::Option<::prost::alloc::string::String>,
+        /// The fully-qualified type name of the extension field. Unlike
+        /// Metadata.type, Declaration.type must have a leading dot for messages
+        /// and enums.
+        #[prost(string, optional, tag="3")]
+        pub r#type: ::core::option::Option<::prost::alloc::string::String>,
+        /// If true, indicates that the number is reserved in the extension range,
+        /// and any extension field with the number will fail to compile. Set this
+        /// when a declared extension field is deleted.
+        #[prost(bool, optional, tag="5")]
+        pub reserved: ::core::option::Option<bool>,
+        /// If true, indicates that the extension must be defined as repeated.
+        /// Otherwise the extension must be defined as optional.
+        #[prost(bool, optional, tag="6")]
+        pub repeated: ::core::option::Option<bool>,
+    }
+    /// The verification state of the extension range.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum VerificationState {
+        /// All the extensions of the range must be declared.
+        Declaration = 0,
+        Unverified = 1,
+    }
 }
 impl ExtensionRangeOptions {
     const EXTENDABLE_TYPE_ID: &'static str = ".google.protobuf.ExtensionRangeOptions";
@@ -137,7 +190,6 @@ pub struct FieldDescriptorProto {
     /// For booleans, "true" or "false".
     /// For strings, contains the default text contents (not escaped in any way).
     /// For bytes, contains the C escaped value.  All bytes >= 128 are escaped.
-    /// TODO(kenton):  Base-64 encode?
     #[prost(string, optional, tag="7")]
     pub default_value: ::core::option::Option<::prost::alloc::string::String>,
     /// If set, gives the index of a oneof in the containing type's oneof_decl
@@ -155,12 +207,12 @@ pub struct FieldDescriptorProto {
     /// If true, this is a proto3 "optional". When a proto3 field is optional, it
     /// tracks presence regardless of field type.
     ///
-    /// When proto3_optional is true, this field must be belong to a oneof to
-    /// signal to old proto3 clients that presence is tracked for this field. This
-    /// oneof is known as a "synthetic" oneof, and this field must be its sole
-    /// member (each proto3 optional field gets its own synthetic oneof). Synthetic
-    /// oneofs exist in the descriptor only, and do not generate any API. Synthetic
-    /// oneofs must be ordered after all "real" oneofs.
+    /// When proto3_optional is true, this field must belong to a oneof to signal
+    /// to old proto3 clients that presence is tracked for this field. This oneof
+    /// is known as a "synthetic" oneof, and this field must be its sole member
+    /// (each proto3 optional field gets its own synthetic oneof). Synthetic oneofs
+    /// exist in the descriptor only, and do not generate any API. Synthetic oneofs
+    /// must be ordered after all "real" oneofs.
     ///
     /// For message fields, proto3_optional doesn't create any semantic change,
     /// since non-repeated message fields always track presence. However it still
@@ -197,9 +249,10 @@ pub mod field_descriptor_proto {
         Bool = 8,
         String = 9,
         /// Tag-delimited aggregate.
-        /// Group type is deprecated and not supported in proto3. However, Proto3
+        /// Group type is deprecated and not supported after google.protobuf. However, Proto3
         /// implementations should still be able to parse the group wire format and
-        /// treat group fields as unknown fields.
+        /// treat group fields as unknown fields.  In Editions, the group wire format
+        /// can be enabled via the `message_encoding` feature.
         Group = 10,
         /// Length-delimited aggregate.
         Message = 11,
@@ -219,8 +272,11 @@ pub mod field_descriptor_proto {
     pub enum Label {
         /// 0 is reserved for errors
         Optional = 1,
-        Required = 2,
         Repeated = 3,
+        /// The required label is only allowed in google.protobuf.  In proto3 and Editions
+        /// it's explicitly prohibited.  In Editions, the `field_presence` feature
+        /// can be used to get this behavior.
+        Required = 2,
     }
 }
 /// Describes a oneof.
@@ -367,12 +423,16 @@ pub struct FileOptions {
     #[deprecated]
     #[prost(bool, optional, tag="20")]
     pub java_generate_equals_and_hash: ::core::option::Option<bool>,
-    /// If set true, then the Java2 code generator will generate code that
-    /// throws an exception whenever an attempt is made to assign a non-UTF-8
-    /// byte sequence to a string field.
-    /// Message reflection will do the same.
-    /// However, an extension field still accepts non-UTF-8 byte sequences.
-    /// This option has no effect on when used with the lite runtime.
+    /// A proto2 file can set this to true to opt in to UTF-8 checking for Java,
+    /// which will throw an exception if invalid UTF-8 is parsed from the wire or
+    /// assigned to a string field.
+    ///
+    /// TODO: clarify exactly what kinds of field types this option
+    /// applies to, and update these docs accordingly.
+    ///
+    /// Proto3 files already perform these checks. Setting the option explicitly to
+    /// false has no effect: it cannot be used to opt proto3 files out of UTF-8
+    /// checks.
     #[prost(bool, optional, tag="27", default="false")]
     pub java_string_check_utf8: ::core::option::Option<bool>,
     #[prost(enumeration="file_options::OptimizeMode", optional, tag="9", default="Speed")]
@@ -400,8 +460,6 @@ pub struct FileOptions {
     pub java_generic_services: ::core::option::Option<bool>,
     #[prost(bool, optional, tag="18", default="false")]
     pub py_generic_services: ::core::option::Option<bool>,
-    #[prost(bool, optional, tag="42", default="false")]
-    pub php_generic_services: ::core::option::Option<bool>,
     /// Is this file deprecated?
     /// Depending on the target platform, this can emit Deprecated annotations
     /// for everything in the file, or it will be completely ignored; in the very
@@ -444,6 +502,9 @@ pub struct FileOptions {
     /// determining the ruby package.
     #[prost(string, optional, tag="45")]
     pub ruby_package: ::core::option::Option<::prost::alloc::string::String>,
+    /// Any features defined in the specific edition.
+    #[prost(message, optional, tag="50")]
+    pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here.
     /// See the documentation for the "Options" section above.
     #[prost(message, repeated, tag="999")]
@@ -526,6 +587,22 @@ pub struct MessageOptions {
     /// parser.
     #[prost(bool, optional, tag="7")]
     pub map_entry: ::core::option::Option<bool>,
+    /// Enable the legacy handling of JSON field name conflicts.  This lowercases
+    /// and strips underscored from the fields before comparison in proto3 only.
+    /// The new behavior takes `json_name` into account and applies to proto2 as
+    /// well.
+    ///
+    /// This should only be used as a temporary measure against broken builds due
+    /// to the change in behavior for JSON field name conflicts.
+    ///
+    /// TODO This is legacy behavior we plan to remove once downstream
+    /// teams have had time to migrate.
+    #[deprecated]
+    #[prost(bool, optional, tag="11")]
+    pub deprecated_legacy_json_field_conflicts: ::core::option::Option<bool>,
+    /// Any features defined in the specific edition.
+    #[prost(message, optional, tag="12")]
+    pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag="999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
@@ -539,15 +616,19 @@ impl MessageOptions {
 pub struct FieldOptions {
     /// The ctype option instructs the C++ code generator to use a different
     /// representation of the field than it normally would.  See the specific
-    /// options below.  This option is not yet implemented in the open source
-    /// release -- sorry, we'll try to include it in a future version!
+    /// options below.  This option is only implemented to support use of
+    /// \[ctype=CORD\] and \[ctype=STRING\] (the default) on non-repeated fields of
+    /// type "bytes" in the open source release -- sorry, we'll try to include
+    /// other types in a future version!
     #[prost(enumeration="field_options::CType", optional, tag="1", default="String")]
     pub ctype: ::core::option::Option<i32>,
     /// The packed option can be enabled for repeated primitive fields to enable
     /// a more efficient representation on the wire. Rather than repeatedly
     /// writing the tag and type for each element, the entire array is encoded as
     /// a single length-delimited blob. In proto3, only explicit setting it to
-    /// false will avoid using packed encoding.
+    /// false will avoid using packed encoding.  This option is prohibited in
+    /// Editions, but the `repeated_field_encoding` feature can be used to control
+    /// the behavior.
     #[prost(bool, optional, tag="2")]
     pub packed: ::core::option::Option<bool>,
     /// The jstype option determines the JavaScript type used for values of the
@@ -580,19 +661,18 @@ pub struct FieldOptions {
     /// call from multiple threads concurrently, while non-const methods continue
     /// to require exclusive access.
     ///
-    ///
-    /// Note that implementations may choose not to check required fields within
-    /// a lazy sub-message.  That is, calling IsInitialized() on the outer message
-    /// may return true even if the inner message has missing required fields.
-    /// This is necessary because otherwise the inner message would have to be
-    /// parsed in order to perform the check, defeating the purpose of lazy
-    /// parsing.  An implementation which chooses not to check required fields
-    /// must be consistent about it.  That is, for any particular sub-message, the
-    /// implementation must either *always* check its required fields, or *never*
-    /// check its required fields, regardless of whether or not the message has
-    /// been parsed.
+    /// Note that lazy message fields are still eagerly verified to check
+    /// ill-formed wireformat or missing required fields. Calling IsInitialized()
+    /// on the outer message would fail if the inner message has missing required
+    /// fields. Failed verification would result in parsing failure (except when
+    /// uninitialized messages are acceptable).
     #[prost(bool, optional, tag="5", default="false")]
     pub lazy: ::core::option::Option<bool>,
+    /// unverified_lazy does no correctness checks on the byte stream. This should
+    /// only be used where lazy with verification is prohibitive for performance
+    /// reasons.
+    #[prost(bool, optional, tag="15", default="false")]
+    pub unverified_lazy: ::core::option::Option<bool>,
     /// Is this field deprecated?
     /// Depending on the target platform, this can emit Deprecated annotations
     /// for accessors, or it will be completely ignored; in the very least, this
@@ -602,6 +682,21 @@ pub struct FieldOptions {
     /// For Google-internal migration only. Do not use.
     #[prost(bool, optional, tag="10", default="false")]
     pub weak: ::core::option::Option<bool>,
+    /// Indicate that the field value should not be printed out when using debug
+    /// formats, e.g. when the field contains sensitive credentials.
+    #[prost(bool, optional, tag="16", default="false")]
+    pub debug_redact: ::core::option::Option<bool>,
+    #[prost(enumeration="field_options::OptionRetention", optional, tag="17")]
+    pub retention: ::core::option::Option<i32>,
+    #[prost(enumeration="field_options::OptionTargetType", repeated, packed="false", tag="19")]
+    pub targets: ::prost::alloc::vec::Vec<i32>,
+    #[prost(message, repeated, tag="20")]
+    pub edition_defaults: ::prost::alloc::vec::Vec<field_options::EditionDefault>,
+    /// Any features defined in the specific edition.
+    #[prost(message, optional, tag="21")]
+    pub features: ::core::option::Option<FeatureSet>,
+    #[prost(message, optional, tag="22")]
+    pub feature_support: ::core::option::Option<field_options::FeatureSupport>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag="999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
@@ -610,11 +705,47 @@ pub struct FieldOptions {
 }
 /// Nested message and enum types in `FieldOptions`.
 pub mod field_options {
+    #[derive(Clone, PartialEq, ::prost::Message)]
+    pub struct EditionDefault {
+        #[prost(enumeration="super::Edition", optional, tag="3")]
+        pub edition: ::core::option::Option<i32>,
+        /// Textproto value.
+        #[prost(string, optional, tag="2")]
+        pub value: ::core::option::Option<::prost::alloc::string::String>,
+    }
+    /// Information about the support window of a feature.
+    #[derive(Clone, PartialEq, ::prost::Message)]
+    pub struct FeatureSupport {
+        /// The edition that this feature was first available in.  In editions
+        /// earlier than this one, the default assigned to EDITION_LEGACY will be
+        /// used, and proto files will not be able to override it.
+        #[prost(enumeration="super::Edition", optional, tag="1")]
+        pub edition_introduced: ::core::option::Option<i32>,
+        /// The edition this feature becomes deprecated in.  Using this after this
+        /// edition may trigger warnings.
+        #[prost(enumeration="super::Edition", optional, tag="2")]
+        pub edition_deprecated: ::core::option::Option<i32>,
+        /// The deprecation warning text if this feature is used after the edition it
+        /// was marked deprecated in.
+        #[prost(string, optional, tag="3")]
+        pub deprecation_warning: ::core::option::Option<::prost::alloc::string::String>,
+        /// The edition this feature is no longer available in.  In editions after
+        /// this one, the last default assigned will be used, and proto files will
+        /// not be able to override it.
+        #[prost(enumeration="super::Edition", optional, tag="4")]
+        pub edition_removed: ::core::option::Option<i32>,
+    }
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
     #[repr(i32)]
     pub enum CType {
         /// Default mode.
         String = 0,
+        /// The option \[ctype=CORD\] may be applied to a non-repeated field of type
+        /// "bytes". It indicates that in C++, the data should be stored in a Cord
+        /// instead of a string.  For very large strings, this may reduce memory
+        /// fragmentation. It may also allow better performance when parsing from a
+        /// Cord, or when parsing with aliasing enabled, as the parsed Cord may then
+        /// alias the original buffer.
         Cord = 1,
         StringPiece = 2,
     }
@@ -628,12 +759,43 @@ pub mod field_options {
         /// Use JavaScript numbers.
         JsNumber = 2,
     }
+    /// If set to RETENTION_SOURCE, the option will be omitted from the binary.
+    /// Note: as of January 2023, support for this is in progress and does not yet
+    /// have an effect (b/264593489).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum OptionRetention {
+        RetentionUnknown = 0,
+        RetentionRuntime = 1,
+        RetentionSource = 2,
+    }
+    /// This indicates the types of entities that the field may apply to when used
+    /// as an option. If it is unset, then the field may be freely used as an
+    /// option on any kind of entity. Note: as of January 2023, support for this is
+    /// in progress and does not yet have an effect (b/264593489).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum OptionTargetType {
+        TargetTypeUnknown = 0,
+        TargetTypeFile = 1,
+        TargetTypeExtensionRange = 2,
+        TargetTypeMessage = 3,
+        TargetTypeField = 4,
+        TargetTypeOneof = 5,
+        TargetTypeEnum = 6,
+        TargetTypeEnumEntry = 7,
+        TargetTypeService = 8,
+        TargetTypeMethod = 9,
+    }
 }
 impl FieldOptions {
     const EXTENDABLE_TYPE_ID: &'static str = ".google.protobuf.FieldOptions";
 }
 #[derive(Clone, PartialEq, ::prost::Message, ::prost::Extendable)]
 pub struct OneofOptions {
+    /// Any features defined in the specific edition.
+    #[prost(message, optional, tag="1")]
+    pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag="999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
@@ -655,6 +817,18 @@ pub struct EnumOptions {
     /// is a formalization for deprecating enums.
     #[prost(bool, optional, tag="3", default="false")]
     pub deprecated: ::core::option::Option<bool>,
+    /// Enable the legacy handling of JSON field name conflicts.  This lowercases
+    /// and strips underscored from the fields before comparison in proto3 only.
+    /// The new behavior takes `json_name` into account and applies to proto2 as
+    /// well.
+    /// TODO Remove this legacy behavior once downstream teams have
+    /// had time to migrate.
+    #[deprecated]
+    #[prost(bool, optional, tag="6")]
+    pub deprecated_legacy_json_field_conflicts: ::core::option::Option<bool>,
+    /// Any features defined in the specific edition.
+    #[prost(message, optional, tag="7")]
+    pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag="999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
@@ -672,6 +846,17 @@ pub struct EnumValueOptions {
     /// this is a formalization for deprecating enum values.
     #[prost(bool, optional, tag="1", default="false")]
     pub deprecated: ::core::option::Option<bool>,
+    /// Any features defined in the specific edition.
+    #[prost(message, optional, tag="2")]
+    pub features: ::core::option::Option<FeatureSet>,
+    /// Indicate that fields annotated with this enum value should not be printed
+    /// out when using debug formats, e.g. when the field contains sensitive
+    /// credentials.
+    #[prost(bool, optional, tag="3", default="false")]
+    pub debug_redact: ::core::option::Option<bool>,
+    /// Information about the support window of a feature value.
+    #[prost(message, optional, tag="4")]
+    pub feature_support: ::core::option::Option<field_options::FeatureSupport>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag="999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
@@ -683,6 +868,9 @@ impl EnumValueOptions {
 }
 #[derive(Clone, PartialEq, ::prost::Message, ::prost::Extendable)]
 pub struct ServiceOptions {
+    /// Any features defined in the specific edition.
+    #[prost(message, optional, tag="34")]
+    pub features: ::core::option::Option<FeatureSet>,
     // Note:  Field numbers 1 through 32 are reserved for Google's internal RPC
     //   framework.  We apologize for hoarding these numbers to ourselves, but
     //   we were already using them long before we decided to release Protocol
@@ -718,6 +906,9 @@ pub struct MethodOptions {
     pub deprecated: ::core::option::Option<bool>,
     #[prost(enumeration="method_options::IdempotencyLevel", optional, tag="34", default="IdempotencyUnknown")]
     pub idempotency_level: ::core::option::Option<i32>,
+    /// Any features defined in the specific edition.
+    #[prost(message, optional, tag="35")]
+    pub features: ::core::option::Option<FeatureSet>,
     /// The parser stores options it doesn't recognize here. See above.
     #[prost(message, repeated, tag="999")]
     pub uninterpreted_option: ::prost::alloc::vec::Vec<UninterpretedOption>,
@@ -772,14 +963,124 @@ pub mod uninterpreted_option {
     /// The name of the uninterpreted option.  Each string represents a segment in
     /// a dot-separated name.  is_extension is true iff a segment represents an
     /// extension (denoted with parentheses in options specs in .proto files).
-    /// E.g.,{ ["foo", false], ["bar.baz", true], ["qux", false] } represents
-    /// "foo.(bar.baz).qux".
+    /// E.g.,{ ["foo", false], ["bar.baz", true], ["moo", false] } represents
+    /// "foo.(bar.baz).moo".
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct NamePart {
         #[prost(string, required, tag="1")]
         pub name_part: ::prost::alloc::string::String,
         #[prost(bool, required, tag="2")]
         pub is_extension: bool,
+    }
+}
+// ===================================================================
+// Features
+
+/// TODO Enums in C++ gencode (and potentially other languages) are
+/// not well scoped.  This means that each of the feature enums below can clash
+/// with each other.  The short names we've chosen maximize call-site
+/// readability, but leave us very open to this scenario.  A future feature will
+/// be designed and implemented to handle this, hopefully before we ever hit a
+/// conflict here.
+#[derive(Clone, PartialEq, ::prost::Message, ::prost::Extendable)]
+pub struct FeatureSet {
+    #[prost(enumeration="feature_set::FieldPresence", optional, tag="1")]
+    pub field_presence: ::core::option::Option<i32>,
+    #[prost(enumeration="feature_set::EnumType", optional, tag="2")]
+    pub enum_type: ::core::option::Option<i32>,
+    #[prost(enumeration="feature_set::RepeatedFieldEncoding", optional, tag="3")]
+    pub repeated_field_encoding: ::core::option::Option<i32>,
+    #[prost(enumeration="feature_set::Utf8Validation", optional, tag="4")]
+    pub utf8_validation: ::core::option::Option<i32>,
+    #[prost(enumeration="feature_set::MessageEncoding", optional, tag="5")]
+    pub message_encoding: ::core::option::Option<i32>,
+    #[prost(enumeration="feature_set::JsonFormat", optional, tag="6")]
+    pub json_format: ::core::option::Option<i32>,
+    #[prost(extension_set)]
+    pub extension_set: ::prost::ExtensionSet<Self>,
+}
+/// Nested message and enum types in `FeatureSet`.
+pub mod feature_set {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum FieldPresence {
+        Unknown = 0,
+        Explicit = 1,
+        Implicit = 2,
+        LegacyRequired = 3,
+    }
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum EnumType {
+        Unknown = 0,
+        Open = 1,
+        Closed = 2,
+    }
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum RepeatedFieldEncoding {
+        Unknown = 0,
+        Packed = 1,
+        Expanded = 2,
+    }
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum Utf8Validation {
+        Unknown = 0,
+        Verify = 2,
+        None = 3,
+    }
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum MessageEncoding {
+        Unknown = 0,
+        LengthPrefixed = 1,
+        Delimited = 2,
+    }
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum JsonFormat {
+        Unknown = 0,
+        Allow = 1,
+        LegacyBestEffort = 2,
+    }
+}
+impl FeatureSet {
+    const EXTENDABLE_TYPE_ID: &'static str = ".google.protobuf.FeatureSet";
+}
+/// A compiled specification for the defaults of a set of features.  These
+/// messages are generated from FeatureSet extensions and can be used to seed
+/// feature resolution. The resolution with this object becomes a simple search
+/// for the closest matching edition, followed by proto merges.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct FeatureSetDefaults {
+    #[prost(message, repeated, tag="1")]
+    pub defaults: ::prost::alloc::vec::Vec<feature_set_defaults::FeatureSetEditionDefault>,
+    /// The minimum supported edition (inclusive) when this was constructed.
+    /// Editions before this will not have defaults.
+    #[prost(enumeration="Edition", optional, tag="4")]
+    pub minimum_edition: ::core::option::Option<i32>,
+    /// The maximum known edition (inclusive) when this was constructed. Editions
+    /// after this will not have reliable defaults.
+    #[prost(enumeration="Edition", optional, tag="5")]
+    pub maximum_edition: ::core::option::Option<i32>,
+}
+/// Nested message and enum types in `FeatureSetDefaults`.
+pub mod feature_set_defaults {
+    /// A map from every known edition with a unique set of defaults to its
+    /// defaults. Not all editions may be contained here.  For a given edition,
+    /// the defaults at the closest matching edition ordered at or before it should
+    /// be used.  This field must be in strict ascending order by edition.
+    #[derive(Clone, PartialEq, ::prost::Message)]
+    pub struct FeatureSetEditionDefault {
+        #[prost(enumeration="super::Edition", optional, tag="3")]
+        pub edition: ::core::option::Option<i32>,
+        /// Defaults of features that can be overridden in this edition.
+        #[prost(message, optional, tag="4")]
+        pub overridable_features: ::core::option::Option<super::FeatureSet>,
+        /// Defaults of features that can't be overridden in this edition.
+        #[prost(message, optional, tag="5")]
+        pub fixed_features: ::core::option::Option<super::FeatureSet>,
     }
 }
 // ===================================================================
@@ -843,8 +1144,8 @@ pub mod source_code_info {
         /// location.
         ///
         /// Each element is a field number or an index.  They form a path from
-        /// the root FileDescriptorProto to the place where the definition.  For
-        /// example, this path:
+        /// the root FileDescriptorProto to the place where the definition appears.
+        /// For example, this path:
         ///   [ 4, 3, 2, 7, 1 ]
         /// refers to:
         ///   file.message_type(3)  // 4, 3
@@ -898,13 +1199,13 @@ pub mod source_code_info {
         ///   // Comment attached to baz.
         ///   // Another line attached to baz.
         ///
-        ///   // Comment attached to qux.
+        ///   // Comment attached to moo.
         ///   //
-        ///   // Another line attached to qux.
-        ///   optional double qux = 4;
+        ///   // Another line attached to moo.
+        ///   optional double moo = 4;
         ///
         ///   // Detached comment for corge. This is not leading or trailing comments
-        ///   // to qux or corge because there are blank lines separating it from
+        ///   // to moo or corge because there are blank lines separating it from
         ///   // both.
         ///
         ///   // Detached comment for corge paragraph 2.
@@ -952,11 +1253,60 @@ pub mod generated_code_info {
         #[prost(int32, optional, tag="3")]
         pub begin: ::core::option::Option<i32>,
         /// Identifies the ending offset in bytes in the generated code that
-        /// relates to the identified offset. The end offset should be one past
+        /// relates to the identified object. The end offset should be one past
         /// the last relevant byte (so the length of the text = end - begin).
         #[prost(int32, optional, tag="4")]
         pub end: ::core::option::Option<i32>,
+        #[prost(enumeration="annotation::Semantic", optional, tag="5")]
+        pub semantic: ::core::option::Option<i32>,
     }
+    /// Nested message and enum types in `Annotation`.
+    pub mod annotation {
+        /// Represents the identified object's effect on the element in the original
+        /// .proto file.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+        #[repr(i32)]
+        pub enum Semantic {
+            /// There is no effect or the effect is indescribable.
+            None = 0,
+            /// The element is set or otherwise mutated.
+            Set = 1,
+            /// An alias to the element is returned.
+            Alias = 2,
+        }
+    }
+}
+/// The full set of known editions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum Edition {
+    /// A placeholder for an unknown edition value.
+    Unknown = 0,
+    /// A placeholder edition for specifying default behaviors *before* a feature
+    /// was first introduced.  This is effectively an "infinite past".
+    Legacy = 900,
+    /// Legacy syntax "editions".  These pre-date editions, but behave much like
+    /// distinct editions.  These can't be used to specify the edition of proto
+    /// files, but feature definitions must supply proto2/proto3 defaults for
+    /// backwards compatibility.
+    Proto2 = 998,
+    Proto3 = 999,
+    /// Editions that have been released.  The specific values are arbitrary and
+    /// should not be depended on, but they will always be time-ordered for easy
+    /// comparison.
+    Edition2023 = 1000,
+    Edition2024 = 1001,
+    /// Placeholder editions for testing feature resolution.  These should not be
+    /// used or relyed on outside of tests.
+    Edition1TestOnly = 1,
+    Edition2TestOnly = 2,
+    Edition99997TestOnly = 99997,
+    Edition99998TestOnly = 99998,
+    Edition99999TestOnly = 99999,
+    /// Placeholder for specifying unbounded edition support.  This should only
+    /// ever be used by plugins that can expect to never require any changes to
+    /// support a new edition.
+    Max = 2147483647,
 }
 /// `Any` contains an arbitrary serialized protocol buffer message along with a
 /// URL that describes the type of the serialized message.
@@ -981,6 +1331,10 @@ pub mod generated_code_info {
 ///     ...
 ///     if (any.is(Foo.class)) {
 ///       foo = any.unpack(Foo.class);
+///     }
+///     // or ...
+///     if (any.isSameTypeAs(Foo.getDefaultInstance())) {
+///       foo = any.unpack(Foo.getDefaultInstance());
 ///     }
 ///
 ///  Example 3: Pack and unpack a message in Python.
@@ -1011,7 +1365,6 @@ pub mod generated_code_info {
 /// methods only use the fully qualified type name after the last '/'
 /// in the type URL, for example "foo.bar.com/x/y.z" will yield type
 /// name "y.z".
-///
 ///
 /// JSON
 /// ====
@@ -1066,7 +1419,8 @@ pub struct Any {
     ///
     /// Note: this functionality is not currently available in the official
     /// protobuf release, and it is not used for type URLs beginning with
-    /// type.googleapis.com.
+    /// type.googleapis.com. As of May 2023, there are no widely used type server
+    /// implementations and no plans to implement one.
     ///
     /// Schemes other than `http`, `https` (or the empty scheme) might be
     /// used with implementation specific semantics.
@@ -1107,6 +1461,9 @@ pub struct Type {
     /// The source syntax.
     #[prost(enumeration="Syntax", tag="6")]
     pub syntax: i32,
+    /// The source edition string, only valid when syntax is SYNTAX_EDITIONS.
+    #[prost(string, tag="7")]
+    pub edition: ::prost::alloc::string::String,
 }
 /// A single field of a message type.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1221,6 +1578,9 @@ pub struct Enum {
     /// The source syntax.
     #[prost(enumeration="Syntax", tag="5")]
     pub syntax: i32,
+    /// The source edition string, only valid when syntax is SYNTAX_EDITIONS.
+    #[prost(string, tag="6")]
+    pub edition: ::prost::alloc::string::String,
 }
 /// Enum value definition.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1260,6 +1620,8 @@ pub enum Syntax {
     Proto2 = 0,
     /// Syntax `proto3`.
     Proto3 = 1,
+    /// Syntax `editions`.
+    Editions = 2,
 }
 /// Api is a light-weight descriptor for an API Interface.
 ///
@@ -1301,7 +1663,6 @@ pub struct Api {
     /// `google.feature.v1`. For major versions 0 and 1, the suffix can
     /// be omitted. Zero major versions must only be used for
     /// experimental, non-GA interfaces.
-    ///
     ///
     #[prost(string, tag="4")]
     pub version: ::prost::alloc::string::String,
@@ -1388,7 +1749,7 @@ pub struct Method {
 /// The mixin construct implies that all methods in `AccessControl` are
 /// also declared with same name and request/response types in
 /// `Storage`. A documentation generator or annotation processor will
-/// see the effective `Storage.GetAcl` method after inheriting
+/// see the effective `Storage.GetAcl` method after inherting
 /// documentation and annotations as follows:
 ///
 ///     service Storage {
@@ -1487,7 +1848,6 @@ pub struct Mixin {
 /// encoded in JSON format as "3s", while 3 seconds and 1 nanosecond should
 /// be expressed in JSON format as "3.000000001s", and 3 seconds and 1
 /// microsecond should be expressed in JSON format as "3.000001s".
-///
 ///
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Duration {
@@ -1773,7 +2133,7 @@ pub struct ListValue {
 /// `NullValue` is a singleton enumeration to represent the null value for the
 /// `Value` type union.
 ///
-///  The JSON representation for `NullValue` is JSON `null`.
+/// The JSON representation for `NullValue` is JSON `null`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum NullValue {
@@ -1830,7 +2190,6 @@ pub enum NullValue {
 ///     Timestamp timestamp = Timestamp.newBuilder().setSeconds(millis / 1000)
 ///         .setNanos((int) ((millis % 1000) * 1000000)).build();
 ///
-///
 /// Example 5: Compute Timestamp from Java `Instant.now()`.
 ///
 ///     Instant now = Instant.now();
@@ -1838,7 +2197,6 @@ pub enum NullValue {
 ///     Timestamp timestamp =
 ///         Timestamp.newBuilder().setSeconds(now.getEpochSecond())
 ///             .setNanos(now.getNano()).build();
-///
 ///
 /// Example 6: Compute Timestamp from current time in Python.
 ///
@@ -1869,9 +2227,8 @@ pub enum NullValue {
 /// \[`strftime`\](<https://docs.python.org/2/library/time.html#time.strftime>) with
 /// the time format spec '%Y-%m-%dT%H:%M:%S.%fZ'. Likewise, in Java, one can use
 /// the Joda Time's \[`ISODateTimeFormat.dateTime()`\](
-/// <http://www.joda.org/joda-time/apidocs/org/joda/time/format/ISODateTimeFormat.html#dateTime%2D%2D>
+/// <http://joda-time.sourceforge.net/apidocs/org/joda/time/format/ISODateTimeFormat.html#dateTime(>)
 /// ) to obtain a formatter capable of generating timestamps in this format.
-///
 ///
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Timestamp {

@@ -27,6 +27,11 @@ pub struct CodeGeneratorRequest {
     /// they import.  The files will appear in topological order, so each file
     /// appears before any file that imports it.
     ///
+    /// Note: the files listed in files_to_generate will include runtime-retention
+    /// options only, but all other files will include source-retention options.
+    /// The source_file_descriptors field below is available in case you need
+    /// source-retention options for files_to_generate.
+    ///
     /// protoc guarantees that all proto_files will be written after
     /// the fields above, even though this is not technically guaranteed by the
     /// protobuf wire format.  This theoretically could allow a plugin to stream
@@ -39,6 +44,11 @@ pub struct CodeGeneratorRequest {
     /// fully qualified.
     #[prost(message, repeated, tag="15")]
     pub proto_file: ::prost::alloc::vec::Vec<super::FileDescriptorProto>,
+    /// File descriptors with all options, including source-retention options.
+    /// These descriptors are only provided for the files listed in
+    /// files_to_generate.
+    #[prost(message, repeated, tag="17")]
+    pub source_file_descriptors: ::prost::alloc::vec::Vec<super::FileDescriptorProto>,
     /// The version number of protocol compiler.
     #[prost(message, optional, tag="3")]
     pub compiler_version: ::core::option::Option<Version>,
@@ -60,6 +70,18 @@ pub struct CodeGeneratorResponse {
     /// This is a bitwise "or" of values from the Feature enum.
     #[prost(uint64, optional, tag="2")]
     pub supported_features: ::core::option::Option<u64>,
+    /// The minimum edition this plugin supports.  This will be treated as an
+    /// Edition enum, but we want to allow unknown values.  It should be specified
+    /// according the edition enum value, *not* the edition number.  Only takes
+    /// effect for plugins that have FEATURE_SUPPORTS_EDITIONS set.
+    #[prost(int32, optional, tag="3")]
+    pub minimum_edition: ::core::option::Option<i32>,
+    /// The maximum edition this plugin supports.  This will be treated as an
+    /// Edition enum, but we want to allow unknown values.  It should be specified
+    /// according the edition enum value, *not* the edition number.  Only takes
+    /// effect for plugins that have FEATURE_SUPPORTS_EDITIONS set.
+    #[prost(int32, optional, tag="4")]
+    pub maximum_edition: ::core::option::Option<i32>,
     #[prost(message, repeated, tag="15")]
     pub file: ::prost::alloc::vec::Vec<code_generator_response::File>,
 }
@@ -135,5 +157,6 @@ pub mod code_generator_response {
     pub enum Feature {
         None = 0,
         Proto3Optional = 1,
+        SupportsEditions = 2,
     }
 }

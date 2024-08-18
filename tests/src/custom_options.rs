@@ -1,9 +1,7 @@
 //! Tests custom proto options.
 
 use prost::{Extendable, Extension, ExtensionRegistry, Message};
-use prost_types::{
-    DescriptorProto, EnumDescriptorProto, FileDescriptorSet, FileOptions, MessageOptions,
-};
+use prost_types::{DescriptorProto, EnumDescriptorProto, FileDescriptorSet, FileOptions, MessageOptions, MethodDescriptorProto, ServiceDescriptorProto};
 
 mod custom_options {
     include!(concat!(env!("OUT_DIR"), "/custom_options.rs"));
@@ -287,6 +285,50 @@ fn enum_value() {
 }
 
 #[test]
+fn method_value() {
+    let extension = custom_options::ENUM_VALUE_OPT;
+    let file_descriptor_set = load_desc_set(extension);
+    let test_enum = find_test_enum(&file_descriptor_set);
+    let enum_value = test_enum.value.get(0).expect("Enum value missing.");
+    assert_eq!(enum_value.name.as_ref().unwrap(), "Default");
+    let value_options = enum_value
+        .options
+        .as_ref()
+        .expect("Enum value has no options");
+    let ext_data = value_options
+        .extension_data(extension)
+        .expect("Extension data missing");
+    // Data specified in custom_options.proto.
+    assert_eq!(ext_data, &"hello");
+}
+
+#[test]
+fn service_opt() {
+    let extension = custom_options::SERVICE_OPT;
+    let file_descriptor_set = load_desc_set(extension);
+    let test_service = find_test_service(&file_descriptor_set);
+    let method_options = test_service.options.as_ref().expect("Service has no options");
+    let ext_data = method_options
+        .extension_data(extension)
+        .expect("Extension data missing");
+    // Data specified in custom_options.proto.
+    assert_eq!(ext_data, &"hello");
+}
+
+#[test]
+fn method_opt() {
+    let extension = custom_options::METHOD_OPT;
+    let file_descriptor_set = load_desc_set(extension);
+    let test_method = find_test_method(&file_descriptor_set);
+    let method_options = test_method.options.as_ref().expect("Method has no options");
+    let ext_data = method_options
+        .extension_data(extension)
+        .expect("Extension data missing");
+    // Data specified in custom_options.proto.
+    assert_eq!(ext_data, &"hello");
+}
+
+#[test]
 fn register_extensions() {
     let mut extension_registry = ExtensionRegistry::new();
     custom_options::register_extensions(&mut extension_registry);
@@ -381,4 +423,34 @@ fn find_test_enum(descriptor_set: &FileDescriptorSet) -> &EnumDescriptorProto {
         }
     }
     panic!("Could not find EnumWithCustomOptions test enum.");
+}
+
+fn find_test_service(descriptor_set: &FileDescriptorSet) -> &ServiceDescriptorProto {
+    for file in &descriptor_set.file {
+        let service_proto = match file.service.iter().find(|proto| {
+            proto
+                .name
+                .as_ref()
+                .expect("Service has no name")
+                .contains("ServiceWithCustomOptions")
+        }) {
+            None => continue,
+            Some(proto) => return proto,
+        };
+    }
+    panic!("Could not find ServiceWithCustomOptions test service.");
+}
+
+fn find_test_method(descriptor_set: &FileDescriptorSet) -> &MethodDescriptorProto {
+    let service_proto = find_test_service(descriptor_set);
+    match service_proto.method.iter().find(|proto| {
+        proto
+            .name
+            .as_ref()
+            .expect("Method has no name")
+            .contains("MethodWithCustomOptions")
+    }) {
+        None => panic!("Could not find EnumWithCustomOptions test enum."),
+        Some(proto) => proto,
+    }
 }
